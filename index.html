@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sheriff Robot | Face Tracking System</title>
+<style>
+:root{color-scheme:dark;--bg:#020b1b;--panel:#071a31;--line:#16436a;--cyan:#29c8ff;--green:#24ff65;--yellow:#ffed35;--red:#ff4559;--muted:#9db5d0}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#0a2544 0,#020817 65%);color:#eef6ff;font-family:Segoe UI,Arial,"Malgun Gothic",sans-serif}
+header{padding:20px 24px;border-bottom:2px solid #16436a;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.badge{font-size:34px}h1{font-size:clamp(24px,4vw,38px);margin:0}header p{margin:4px 0 0;color:#c4d8ef}.live{margin-left:auto;color:var(--green);font-weight:700}
+main{max-width:1500px;margin:24px auto;padding:0 20px;display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,0.9fr);gap:20px}
+.stage{position:relative;background:#000;border:1px solid #2876a9;border-radius:12px;overflow:hidden;min-height:280px;aspect-ratio:4/3}
+video,canvas{position:absolute;width:100%;height:100%;inset:0;object-fit:cover;transform:scaleX(-1)}
+#placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#8aa6c7;padding:20px;line-height:1.8}
+#placeholder.hidden{display:none}
+.side{display:flex;flex-direction:column;gap:14px}.card{background:linear-gradient(145deg,#071b33,#041124);border:1px solid var(--line);border-radius:12px;padding:18px}.card h2{font-size:16px;font-weight:500;margin:0 0 10px;color:#c8ddf3}.value{font-size:21px;font-weight:750;color:var(--green)}.small{font-size:14px;color:var(--muted);margin-top:7px}.angle{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:9px;color:#c3d6eb}.angle strong{color:#fff}.cyan{color:var(--cyan)}.yellow{color:var(--yellow)}.red{color:var(--red)}
+.actions{max-width:1500px;margin:0 auto;padding:0 20px 22px;display:flex;gap:10px;flex-wrap:wrap}button{border:1px solid #2670a6;border-radius:8px;padding:12px 17px;background:#0c3153;color:white;font-weight:700;cursor:pointer}button:hover{background:#145080}button:disabled{opacity:.5;cursor:not-allowed}.note{max-width:1500px;margin:0 auto 28px;padding:0 20px;color:#9eb5d0;font-size:13px;line-height:1.7}.statusline{padding:10px 12px;border-radius:8px;background:#061326;color:#c7d9ec;margin-top:12px;font-size:14px}
+@media(max-width:850px){main{grid-template-columns:1fr}.live{margin-left:0}.stage{aspect-ratio:4/3}}
+</style>
+</head>
+<body>
+<header>
+  <div class="badge">⭐</div>
+  <div><h1>Sheriff Robot</h1><p>실시간 얼굴 인식 / 좌표 추적 / 얼굴 회전 인식</p></div>
+  <div class="live" id="systemStatus">● 대기 중</div>
+</header>
+<main>
+  <section>
+    <div class="stage">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+      <div id="placeholder">카메라를 시작하려면 아래의 <b>카메라 시작</b> 버튼을 누르세요.<br>브라우저의 카메라 권한을 허용해야 합니다.</div>
+    </div>
+    <div class="statusline" id="message">시작 버튼을 누르면 얼굴 인식을 준비합니다.</div>
+  </section>
+  <aside class="side">
+    <div class="card"><h2>▣ 얼굴 인식 상태</h2><div class="value" id="faceStatus">대기 중</div><div class="small" id="faceDetail">카메라가 아직 시작되지 않았습니다.</div></div>
+    <div class="card"><h2>↻ 얼굴 회전 방향</h2><div class="value yellow" id="direction">-</div><div class="angle"><span>Pitch (위/아래)</span><strong id="pitch">-</strong></div><div class="angle"><span>Yaw (좌/우)</span><strong id="yaw">-</strong></div><div class="angle"><span>Roll (기울기)</span><strong id="roll">-</strong></div><div class="small">회전 각도는 대략적인 추정값입니다.</div></div>
+    <div class="card"><h2>⚠ 근접 경고</h2><div class="value" id="distanceStatus">측정 대기</div><div class="small" id="distanceDetail">얼굴 너비가 화면 너비의 35%를 넘으면 경고합니다.</div></div>
+    <div class="card"><h2>⊙ 얼굴 중심 좌표</h2><div class="value cyan" id="coordinates">X: -, Y: -</div><div class="small" id="frameSize">화면 기준 픽셀 좌표</div></div>
+  </aside>
+</main>
+<div class="actions">
+  <button id="startBtn">📷 카메라 시작</button>
+  <button id="stopBtn" disabled>■ 카메라 종료</button>
+</div>
+<div class="note">
+  <b>사용 방법:</b> 카메라 시작을 누르고 권한 요청이 뜨면 허용하세요. 정면, 왼쪽, 오른쪽, 위, 아래로 천천히 고개를 움직여 보세요.<br>
+  <b>중요:</b> 인터넷 연결이 필요합니다. 카메라 권한 오류가 나면 VS Code의 Live Server로 이 HTML을 열어 보세요. 이 페이지는 카메라 영상을 서버로 전송하지 않고 브라우저 안에서 처리합니다.
+</div>
+<script type="module">
+const video = document.getElementById('video');
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const placeholder = document.getElementById('placeholder');
+const $ = id => document.getElementById(id);
+let stream = null, landmarker = null, running = false, raf = null, lastVideoTime = -1;
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+
+function setMessage(text){ $('message').textContent = text; }
+function rotationFromMatrix(data) {
+  // MediaPipe returns a 4x4 facial transformation matrix.
+  const m = Array.from(data);
+  // Try the 3x3 rotation block in the column-major matrix.
+  const r00=m[0], r10=m[1], r20=m[2], r01=m[4], r11=m[5], r21=m[6], r02=m[8], r12=m[9], r22=m[10];
+  const sy = Math.sqrt(r00*r00 + r10*r10);
+  let pitch, yaw, roll;
+  if (sy > 1e-6) {
+    pitch = Math.atan2(r21, r22);
+    yaw = Math.atan2(-r20, sy);
+    roll = Math.atan2(r10, r00);
+  } else {
+    pitch = Math.atan2(-r12, r11); yaw = Math.atan2(-r20, sy); roll = 0;
+  }
+  return [pitch*180/Math.PI, yaw*180/Math.PI, roll*180/Math.PI];
+}
+function drawResults(result) {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width=w; canvas.height=h; }
+  ctx.clearRect(0,0,w,h);
+  if (!result.faceLandmarks || !result.faceLandmarks.length) {
+    $('faceStatus').textContent='얼굴을 찾지 못함';
+    $('faceDetail').textContent='얼굴이 화면 안에 보이도록 위치를 조절하세요.';
+    $('direction').textContent='-'; $('pitch').textContent='-'; $('yaw').textContent='-'; $('roll').textContent='-';
+    $('coordinates').textContent='X: -, Y: -'; $('distanceStatus').textContent='측정 대기';
+    return;
+  }
+  const pts = result.faceLandmarks[0];
+  const xs=pts.map(p=>p.x*w), ys=pts.map(p=>p.y*h);
+  const x1=Math.max(0,Math.min(...xs)), x2=Math.min(w-1,Math.max(...xs));
+  const y1=Math.max(0,Math.min(...ys)), y2=Math.min(h-1,Math.max(...ys));
+  const cx=Math.round((x1+x2)/2), cy=Math.round((y1+y2)/2);
+  const ratio=(x2-x1)/w, close=ratio>0.35;
+  ctx.strokeStyle=close?'#ff344b':'#21ff60'; ctx.lineWidth=Math.max(2,w/480);
+  ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+  ctx.beginPath(); ctx.moveTo(cx-18,cy);ctx.lineTo(cx+18,cy);ctx.moveTo(cx,cy-18);ctx.lineTo(cx,cy+18);ctx.stroke();
+  ctx.font=`bold ${Math.max(16,w/45)}px Arial`; ctx.fillStyle=close?'#ff344b':'#21ff60';
+  ctx.fillText(close?'WARNING! TOO CLOSE!':'TARGET LOCKED',x1,Math.max(24,y1-10));
+  $('faceStatus').textContent='✓ 정상 인식됨';
+  $('faceDetail').textContent=`얼굴 특징점 ${pts.length}개 추적 중`;
+  $('coordinates').textContent=`X: ${cx}, Y: ${cy}`;
+  $('frameSize').textContent=`화면 크기: ${w} × ${h} px`;
+  $('distanceStatus').textContent=close?'가까움 - 주의':'정상 거리';
+  $('distanceStatus').className='value '+(close?'red':'');
+  $('distanceDetail').textContent=`얼굴 너비 비율: ${(ratio*100).toFixed(1)}% (경고 기준 35%)`;
+  if (result.facialTransformationMatrixes && result.facialTransformationMatrixes.length) {
+    const [pitch,yaw,roll]=rotationFromMatrix(result.facialTransformationMatrixes[0].data);
+    // Mirror preview means the perceived left/right labels may need swapping on some devices.
+    let direction='정면 (Looking FORWARD)';
+    if (yaw < -15) direction='오른쪽 회전 (Turned RIGHT)';
+    else if (yaw > 15) direction='왼쪽 회전 (Turned LEFT)';
+    else if (pitch < -15) direction='위쪽 (Looking UP)';
+    else if (pitch > 15) direction='아래쪽 (Looking DOWN)';
+    else if (Math.abs(roll)>15) direction=roll>0?'오른쪽 기울임':'왼쪽 기울임';
+    $('direction').textContent=direction;
+    $('pitch').textContent=`${pitch.toFixed(1)}°`;
+    $('yaw').textContent=`${yaw.toFixed(1)}°`;
+    $('roll').textContent=`${roll.toFixed(1)}°`;
+  } else {
+    $('direction').textContent='회전 정보 없음';
+  }
+}
+async function frameLoop() {
+  if (!running) return;
+  if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime=video.currentTime;
+    try { const result=landmarker.detectForVideo(video, performance.now()); drawResults(result); }
+    catch(err){ console.error(err); setMessage('얼굴 인식 중 오류: '+err.message); }
+  }
+  raf=requestAnimationFrame(frameLoop);
+}
+async function start() {
+  startBtn.disabled=true;
+  try {
+    setMessage('얼굴 인식 모델을 불러오는 중입니다. 처음에는 시간이 걸릴 수 있습니다.');
+    $('systemStatus').textContent='● 모델 준비 중';
+    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+    const files = await vision.FilesetResolver.forVisionTasks(WASM_ROOT);
+    landmarker = await vision.FaceLandmarker.createFromOptions(files,{
+      baseOptions:{modelAssetPath:MODEL_URL, delegate:'CPU'},
+      runningMode:'VIDEO',
+      numFaces:1,
+      outputFaceBlendshapes:false,
+      outputFacialTransformationMatrixes:true
+    });
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    video.srcObject=stream;
+    await video.play();
+    running=true; lastVideoTime=-1;
+    placeholder.classList.add('hidden');
+    stopBtn.disabled=false;
+    $('systemStatus').textContent='● 시스템 정상 작동 중';
+    setMessage('카메라가 켜졌습니다. 고개를 천천히 움직여 회전 인식을 확인하세요.');
+    raf=requestAnimationFrame(frameLoop);
+  } catch(err) {
+    console.error(err);
+    startBtn.disabled=false;
+    $('systemStatus').textContent='● 시작 실패';
+    setMessage('시작 실패: '+err.message+' — 인터넷 연결과 카메라 권한을 확인하세요. 카메라는 localhost 또는 HTTPS에서 여는 것을 권장합니다.');
+    if (landmarker) { try{landmarker.close()}catch(e){} landmarker=null; }
+  }
+}
+function stop() {
+  running=false;
+  if (raf) cancelAnimationFrame(raf);
+  if (stream) { stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  video.srcObject=null;
+  if (landmarker) { try{landmarker.close()}catch(e){} landmarker=null; }
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  placeholder.classList.remove('hidden');
+  startBtn.disabled=false; stopBtn.disabled=true;
+  $('systemStatus').textContent='● 종료됨';
+  $('faceStatus').textContent='대기 중'; $('faceDetail').textContent='카메라가 종료되었습니다.';
+  $('direction').textContent='-'; $('pitch').textContent='-'; $('yaw').textContent='-'; $('roll').textContent='-';
+  $('coordinates').textContent='X: -, Y: -'; $('distanceStatus').textContent='측정 대기';
+  setMessage('카메라가 종료되었습니다.');
+}
+startBtn.addEventListener('click',start);
+stopBtn.addEventListener('click',stop);
+window.addEventListener('beforeunload',stop);
+</script>
+</body>
+</html>
